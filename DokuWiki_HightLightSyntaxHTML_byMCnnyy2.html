@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, maximum-scale=1.0, user-scalable=no">
+    <title>DokuWiki高亮语法编辑器</title>
+    <!-- CodeMirror 核心 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
+    <!-- Cloudflare Turnstile -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+    <style>
+        * { box-sizing: border-box; font-family: 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace, system-ui; }
+        body { 
+            margin: 0; min-height: 100vh; 
+            background: #0b0e14; 
+            display: flex; align-items: center; justify-content: center; 
+            padding: 16px;
+        }
+        .app-container {
+            max-width: 1500px; width: 100%; 
+            background: #14181f; 
+            border-radius: 28px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.7), 0 0 0 1px #2a3340;
+            padding: 24px 24px 20px;
+            color: #e3e9f2;
+        }
+        h2 { 
+            margin: 0 0 18px 0; font-weight: 500; font-size: 1.9rem; 
+            color: #d6e3ff; letter-spacing: -0.01em; 
+            display: flex; align-items: center; gap: 10px;
+        }
+        .page-row {
+            display: flex; gap: 12px; margin-bottom: 18px;
+        }
+        .page-row input {
+            flex: 1; background: #1e2630; border: 1px solid #38434f;
+            color: #f0f4fa; padding: 12px 18px; border-radius: 48px;
+            font-size: 1rem; outline: none; transition: all 0.15s;
+        }
+        .page-row input:focus { border-color: #5f9ef0; box-shadow: 0 0 0 2px rgba(95,158,240,0.25); }
+        .page-row button {
+            background: #2e3b4b; border: 1px solid #4b5e73; color: #eef3ff;
+            padding: 0 24px; border-radius: 48px; font-weight: 600; font-size: 1rem;
+            cursor: pointer; transition: 0.15s; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        .page-row button:hover { background: #3f5167; }
+
+        /* 工具栏 */
+        .toolbar-quick {
+            display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+            padding: 8px 0; border-bottom: 1px solid #2a3643;
+        }
+        .tool-btn {
+            background: #202832; border: 1px solid #3e4c5d; color: #cbdefa;
+            border-radius: 30px; padding: 8px 14px; font-size: 0.9rem; font-weight: 500;
+            cursor: pointer; transition: 0.1s; min-width: 44px; text-align: center;
+            box-shadow: 0 1px 3px #00000030;
+        }
+        .tool-btn:hover { background: #2f3e50; border-color: #6a8ab0; }
+        .popup-panel {
+            display: none; position: absolute; background: #1c2530; 
+            border: 1px solid #4a5f77; border-radius: 18px; padding: 10px 12px;
+            box-shadow: 0 10px 25px #00000060; z-index: 100;
+            backdrop-filter: blur(4px); flex-wrap: wrap; gap: 6px; max-width: 400px;
+        }
+        .popup-panel.show { display: flex; }
+        .popup-panel .tool-btn { font-size: 0.85rem; padding: 6px 12px; }
+
+        /* 编辑器 */
+        .editor-wrap { border-radius: 18px; overflow: hidden; border: 1px solid #304050; margin-bottom: 20px; }
+        .CodeMirror {
+            height: 460px; font-size: 15px; line-height: 1.6; 
+            background: #0f151c; color: #dfe7f2;
+        }
+        .cm-s-dracula .CodeMirror-gutters { background: #0c1219; border-right: 1px solid #2c3b4b; }
+
+        /* 元数据行 */
+        .meta-bar {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 20px; margin: 10px 0 12px;
+        }
+        .meta-bar label { display: flex; align-items: center; gap: 8px; color: #bdd0ec; }
+        .summary-input {
+            background: #1b232c; border: 1px solid #3e5368; color: #f0f6ff;
+            padding: 10px 18px; border-radius: 40px; width: 280px; font-size: 0.95rem;
+        }
+        .action-group { margin-left: auto; display: flex; gap: 12px; }
+        .btn {
+            padding: 12px 26px; border-radius: 50px; font-weight: 600; font-size: 1rem;
+            border: none; cursor: pointer; transition: 0.15s; background: #2c3f52; color: #ecf3ff;
+            box-shadow: 0 4px 8px #00000030; border: 1px solid #4e6a83;
+        }
+        .btn-primary { background: #1e6f5c; border-color: #3ba58b; color: white; }
+        .btn-primary:hover { background: #288065; }
+
+        /* 折叠预览区 */
+        .preview-collapsible {
+            margin-top: 16px; border-top: 1px solid #30455a; padding-top: 12px;
+        }
+        .preview-header {
+            display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none;
+        }
+        .preview-header h3 { margin: 0; font-weight: 400; color: #bbd1f0; }
+        .chevron { font-size: 1.4rem; transition: 0.2s; }
+        .preview-content {
+            background: #10171f; border-radius: 18px; padding: 16px 22px; 
+            margin-top: 12px; border: 1px solid #2e4257; max-height: 380px; overflow: auto;
+            color: #d9e6ff; line-height: 1.6; display: none;
+        }
+        .preview-content.show { display: block; }
+        .wiki-html a { color: #9cc9ff; }
+
+        /* turnstile */
+        .cf-area { margin: 12px 0; min-height: 70px; display: flex; align-items: center; gap: 16px; }
+        .alt-cf-btn { background: transparent; border: 1px dashed #7089a8; color: #b6d0f0; padding: 6px 18px; border-radius: 30px; cursor: pointer; }
+
+        /* Toast 右上角 */
+        #toastMessage {
+            position: fixed; top: 24px; right: 24px; max-width: 360px; padding: 14px 22px;
+            background: #1c2a3a; border-left: 6px solid #3d8cfa; color: #e9f2ff;
+            border-radius: 18px; box-shadow: 0 10px 25px #00000070; z-index: 9999;
+            backdrop-filter: blur(8px); transform: translateX(400px); opacity: 0;
+            transition: transform 0.25s ease, opacity 0.2s; pointer-events: none;
+            font-weight: 500; border: 1px solid #3e6182;
+        }
+        #toastMessage.show { transform: translateX(0); opacity: 1; pointer-events: none; }
+        #toastMessage.error { border-left-color: #f87171; background: #2d1f26; }
+
+        /* 中央模态 */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000000b0;
+            backdrop-filter: blur(3px); display: none; align-items: center; justify-content: center;
+            z-index: 10000;
+        }
+        .modal-card {
+            background: #1d2836; border-radius: 32px; padding: 28px 32px; max-width: 420px;
+            width: 90%; box-shadow: 0 25px 50px #000000; border: 1px solid #3e6080; color: #eef4ff;
+        }
+        .modal-card h3 { margin-top: 0; }
+        .modal-actions { display: flex; gap: 16px; margin-top: 28px; justify-content: flex-end; }
+        .close-icon { float: right; cursor: pointer; font-size: 1.8rem; line-height: 1; }
+
+        /* 解决触屏选词 (尽量) */
+        .CodeMirror { -webkit-user-select: text; user-select: text; }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <h2>✎ DokuWiki高亮语法编辑器by MCnnyy2</h2>
+    
+    <!-- 页面输入 -->
+    <div class="page-row">
+        <input type="text" id="pageInput" placeholder="页面名称 或 URL (例如 playground:playground)" value="">
+        <button id="loadBtn">📥 加载</button>
+    </div>
+
+    <!-- 快捷工具栏 (原生语法) -->
+    <div class="toolbar-quick" id="quickToolbar">
+        <!-- 动态生成或硬编码，方便维护：用JS生成 -->
+    </div>
+
+    <!-- 编辑器 -->
+    <div class="editor-wrap">
+        <textarea id="wikiEditor" style="display: none;"></textarea>
+    </div>
+
+    <!-- 元数据 -->
+    <div class="meta-bar">
+        <label><input type="checkbox" id="minorEditChk"> 🔹 次要更改</label>
+        <input type="text" id="summaryInput" class="summary-input" placeholder="摘要 (可选)">
+        <div class="action-group">
+            <button class="btn" id="previewBtn">🔍 预览</button>
+            <button class="btn btn-primary" id="saveBtn">💾 保存</button>
+        </div>
+    </div>
+
+    <!-- Cloudflare -->
+    <div class="cf-area">
+        <div id="turnstileWidget"></div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <span id="cfStatus" style="color:#9bb7dd;"></span>
+            <button class="alt-cf-btn" id="switchTestSitekeyBtn" style="display: none;">🔄 测试密钥</button>
+        </div>
+    </div>
+
+    <!-- 可折叠预览 -->
+    <div class="preview-collapsible">
+        <div class="preview-header" id="togglePreviewHeader">
+            <span class="chevron" id="previewChevron">▶</span>
+            <h3>📄 渲染预览 (playground:playground2)</h3>
+        </div>
+        <div id="previewContainer" class="preview-content wiki-html">
+            <em>点击预览按钮，内容将暂存并在此显示。</em>
+        </div>
+    </div>
+</div>
+
+<!-- Toast 右上角 -->
+<div id="toastMessage"></div>
+
+<!-- 中央确认模态 -->
+<div class="modal-overlay" id="confirmModal">
+    <div class="modal-card">
+        <span class="close-icon" id="modalCloseX">&times;</span>
+        <h3 id="modalTitle">验证通过</h3>
+        <p id="modalMessage">人机验证成功，是否继续保存？</p>
+        <div class="modal-actions">
+            <button class="btn" id="modalCancelBtn">取消</button>
+            <button class="btn btn-primary" id="modalConfirmBtn">确认保存</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/mode/simple.min.js"></script>
+<script>
+    (function(){
+        "use strict";
+        // ---------- 配置 ----------
+        const API_BASE = ""; //填写wiki网站的API接口，一般以lib/exe/jsonrpc.php/结尾
+        const SITEKEY = "";  //填写cloudflare人机验证密钥，不想人机验证就填1x00000000000000000000AA
+        const TEST_SITEKEY = "1x00000000000000000000AA";
+        const PREVIEW_PAGE = "playground:playground2";  //预览时文件会暂存在哪
+        
+        // DOM
+        const pageInput = document.getElementById('pageInput');
+        const loadBtn = document.getElementById('loadBtn');
+        const editorTextarea = document.getElementById('wikiEditor');
+        const minorChk = document.getElementById('minorEditChk');
+        const summaryInput = document.getElementById('summaryInput');
+        const previewBtn = document.getElementById('previewBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const previewContainer = document.getElementById('previewContainer');
+        const toggleHeader = document.getElementById('togglePreviewHeader');
+        const previewChevron = document.getElementById('previewChevron');
+        const turnstileContainer = document.getElementById('turnstileWidget');
+        const cfStatus = document.getElementById('cfStatus');
+        const switchTestBtn = document.getElementById('switchTestSitekeyBtn');
+        const toastEl = document.getElementById('toastMessage');
+        const modalOverlay = document.getElementById('confirmModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalMessage = document.getElementById('modalMessage');
+        const modalConfirm = document.getElementById('modalConfirmBtn');
+        const modalCancel = document.getElementById('modalCancelBtn');
+        const modalCloseX = document.getElementById('modalCloseX');
+
+        // 状态
+        let currentPageId = "";
+        let editor = null;
+        let turnstileId = null;
+        let currentSitekey = SITEKEY;
+        let turnstileToken = null;          // 已验证通过的token
+        let pendingAction = null;            // 'preview' or 'save'
+        let pendingCallback = null;
+
+        // ---------- Toast ----------
+        function showToast(msg, isError = false) {
+            toastEl.textContent = msg;
+            toastEl.classList.remove('error');
+            if (isError) toastEl.classList.add('error');
+            toastEl.classList.add('show');
+            setTimeout(() => toastEl.classList.remove('show'), 3500);
+        }
+
+        // ---------- 模态 ----------
+        function showModal(title, message, onConfirm) {
+            modalTitle.textContent = title;
+            modalMessage.textContent = message;
+            modalOverlay.style.display = 'flex';
+            const confirmHandler = () => {
+                modalOverlay.style.display = 'none';
+                if (onConfirm) onConfirm();
+                cleanupModal();
+            };
+            const cancelHandler = () => { modalOverlay.style.display = 'none'; cleanupModal(); };
+            modalConfirm.onclick = confirmHandler;
+            modalCancel.onclick = cancelHandler;
+            modalCloseX.onclick = cancelHandler;
+            modalOverlay.onclick = (e) => { if(e.target === modalOverlay) cancelHandler(); };
+            function cleanup() {
+                modalConfirm.onclick = null; modalCancel.onclick = null; modalCloseX.onclick = null;
+            }
+        }
+
+        // ---------- 高亮模式 (修复下划线、列表、表情) ----------
+        CodeMirror.defineSimpleMode("dokuwiki", {
+            start: [
+                { regex: /^======[ \t]+.*[ \t]+======$/i, token: "header", sol: true },
+                { regex: /^=====[ \t]+.*[ \t]+=====$/i, token: "header", sol: true },
+                { regex: /^====[ \t]+.*[ \t]+====$/i, token: "header", sol: true },
+                { regex: /^===[ \t]+.*[ \t]+===$/i, token: "header", sol: true },
+                { regex: /^==[ \t]+.*[ \t]==$/i, token: "header", sol: true },
+                { regex: /\*\*[^*]+\*\*/, token: "strong" },
+                { regex: /\/\/[^\/]+\/\//, token: "em" },
+                { regex: /__[^_]+__/, token: "underline" },
+                { regex: /''[^']+''/, token: "code" },
+                { regex: /<del>[^<]+<\/del>/, token: "strikethrough" },
+                { regex: /^----+$/i, token: "hr", sol: true },
+                { regex: /\[\[[^\]]+\]\]/, token: "link" },
+                { regex: /\{\{[^\}]+\}\}/, token: "variable-2" },
+                // 列表 (* 或 -) 和数字列表
+                { regex: /^[ \t]*[\*\-][ \t]+.*$/, token: "list", sol: true },
+                { regex: /^[ \t]*[0-9]+[\.\)][ \t]+.*$/, token: "list", sol: true },
+                // 表情：包括组合
+                { regex: /8-[)Oo]|:-\)|:\(|;-\)|:D|:P|:o|:O|:-[xX\|\/\\]|\^_\^|m\(|LOL|FIXME|DELETEME/, token: "emoticon" },
+                { regex: /^---[ \t]+\/\/[^\n]+\/\/$/i, token: "comment", sol: true },
+                { regex: /\[\([^\)]+\)\]/, token: "comment" },
+                { regex: /<[^>\s]+[^>]*>/, token: "tag" },
+                { regex: /./, token: null }
+            ]
+        });
+        // 增加颜色自定义: 通过theme dracula + 额外样式
+        const style = document.createElement('style');
+        style.textContent = `
+            .cm-strong { color: #ffb86c !important; font-weight: bold; }
+            .cm-underline { color: #8be9fd; text-decoration: underline; }
+            .cm-em { color: #f1fa8c; font-style: italic; }
+            .cm-list { color: #bd93f9; }
+            .cm-emoticon { color: #ff79c6; }
+            .cm-link { color: #50fa7b; text-decoration: underline; }
+        `;
+        document.head.appendChild(style);
+
+        editor = CodeMirror.fromTextArea(editorTextarea, {
+            mode: "dokuwiki", theme: "dracula", lineNumbers: true, lineWrapping: true,
+            autofocus: false, tabSize: 2
+        });
+        editor.setSize(null, 460);
+
+        // ---------- 工具栏生成 (原生语法) ----------
+        function buildToolbar() {
+            const bar = document.getElementById('quickToolbar');
+            const btns = [
+                { label: 'B', wrap: '**', desc: '粗体' },
+                { label: 'I', wrap: '//', desc: '斜体' },
+                { label: 'U', wrap: '__', desc: '下划线' },
+                { label: "''", wrap: "''", desc: '代码' },
+                { label: 'S', wrap: '<del>', suffix: '</del>', desc: '删除线' },
+                { label: 'H↕', action: 'headingToggle', desc: '标题切换' },
+                { label: 'H-', action: 'headingLower', desc: '降低标题级别' },
+                { label: 'H+', action: 'headingRaise', desc: '提升标题级别' },
+                { label: 'H···', action: 'showHeadingPopup', desc: '1~5级标题' },
+                { label: '[[ ]]', wrap: '[[', suffix: ']]', desc: '内部链接' },
+                { label: '🔗', wrap: '[[', suffix: '|显示文字]]', desc: '超链接' },
+                { label: '•-', insert: '  - ', desc: '数字列表' },
+                { label: '•*', insert: '  * ', desc: '普通列表' },
+                { label: '—', insert: '----\n', desc: '分割线' },
+                { label: '🖼', wrap: '{{', suffix: '}}', desc: '图片' },
+                { label: '😊', action: 'showEmojiPopup', desc: '表情' },
+                { label: '✎', action: 'insertSignature', desc: '署标签' }
+            ];
+            bar.innerHTML = '';
+            btns.forEach(b => {
+                const btn = document.createElement('button');
+                btn.className = 'tool-btn';
+                btn.textContent = b.label;
+                btn.title = b.desc;
+                btn.addEventListener('click', (e) => handleToolAction(b, e));
+                bar.appendChild(btn);
+            });
+            // 弹出层 (标题)
+            const headingPopup = document.createElement('div');
+            headingPopup.className = 'popup-panel'; headingPopup.id = 'headingPopup';
+            for(let i=1;i<=5;i++) {
+                const hbtn = document.createElement('button'); hbtn.className='tool-btn';
+                hbtn.textContent = 'H'+i; hbtn.onclick = ()=> insertHeading(i);
+                headingPopup.appendChild(hbtn);
+            }
+            document.body.appendChild(headingPopup);
+            // 表情弹出层
+            const emojiPopup = document.createElement('div');
+            emojiPopup.className = 'popup-panel'; emojiPopup.id = 'emojiPopup';
+            const emojis = ['8-)','8-O','8-o',':-(',':-)','=)',':-/',':-\\',':-?',':-D',':-P',':-o',':-O',':-x',':-X',':-|',';-)','m(',';-)','^_^',':?:',':!:','LOL','FIXME','DELETEME'];
+            emojis.forEach(e => {
+                const eb = document.createElement('button'); eb.className='tool-btn'; eb.textContent=e;
+                eb.onclick = ()=> insertAtCursor(e);
+                emojiPopup.appendChild(eb);
+            });
+            document.body.appendChild(emojiPopup);
+        }
+
+        function handleToolAction(btn, event) {
+            if(btn.wrap) wrapSelection(btn.wrap, btn.suffix || btn.wrap);
+            else if(btn.insert) insertAtCursor(btn.insert);
+            else if(btn.action) {
+                if(btn.action === 'headingToggle') toggleHeadingLevel();
+                else if(btn.action === 'headingLower') adjustHeading(-1);
+                else if(btn.action === 'headingRaise') adjustHeading(1);
+                else if(btn.action === 'showHeadingPopup') togglePopup('headingPopup', event);
+                else if(btn.action === 'showEmojiPopup') togglePopup('emojiPopup', event);
+                else if(btn.action === 'insertSignature') {
+                    const date = new Date().toISOString().slice(0,16).replace('T',' ');
+                    insertAtCursor(`--- //[[邮箱|名字]] ${date}//`);
+                }
+            }
+        }
+
+        function togglePopup(id, e) {
+            const pop = document.getElementById(id);
+            if(pop.classList.contains('show')) pop.classList.remove('show');
+            else {
+                document.querySelectorAll('.popup-panel').forEach(p=>p.classList.remove('show'));
+                const rect = e.target.getBoundingClientRect();
+                pop.style.top = (rect.bottom + 6) + 'px';
+                pop.style.left = (rect.left) + 'px';
+                pop.classList.add('show');
+                setTimeout(() => document.addEventListener('click', function hide(e) {
+                    if(!pop.contains(e.target) && !e.target.closest('.tool-btn')) {
+                        pop.classList.remove('show'); document.removeEventListener('click', hide);
+                    }
+                }), 10);
+            }
+        }
+
+        function insertHeading(level) {
+            const eq = '='.repeat(level);
+            wrapSelection(eq+' ', ' '+eq);
+        }
+        function toggleHeadingLevel() { /* 简单示例：检测当前行，切换 ====== 等，略简化，但可手动调用 */ 
+            showToast('点击 H↕ 可手动输入 = 符号', false); 
+        }
+        function adjustHeading(dir) { showToast('使用 H+/H- 调整标题级别', false); }
+        function wrapSelection(open, close) {
+            const sel = editor.getSelection();
+            editor.replaceSelection(open + sel + close);
+        }
+        function insertAtCursor(text) { editor.replaceSelection(text); }
+
+        // ---------- 解析页面ID ----------
+        function extractPageId(str) {
+            str = str.trim(); if(!str) return '';
+            if(str.startsWith('http')) {
+                try {
+                    const u = new URL(str);
+                    if(u.pathname.includes('/doku.php/')) return decodeURIComponent(u.pathname.split('/doku.php/')[1]);
+                    const p = u.searchParams.get('page'); if(p) return p;
+                }catch(e){}
+            }
+            return str;
+        }
+
+        // API
+        async function rpc(method, params) {
+            const res = await fetch(API_BASE, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({jsonrpc:'2.0',method,params,id:1}) });
+            const d = await res.json();
+            if(d.error && d.error.code!==0) throw new Error(d.error.message);
+            return d.result;
+        }
+
+        async function loadPage() {
+            const page = extractPageId(pageInput.value);
+            if(!page) { showToast('请输入有效页面', true); return; }
+            currentPageId = page; pageInput.value = page;
+            try {
+                const content = await rpc('core.getPage', {page, rev:0});
+                editor.setValue(content || '');
+                showToast(`已加载: ${page}`);
+            } catch(e) { showToast('加载失败: '+e.message, true); }
+        }
+
+        // Turnstile
+        function renderTurnstile(sitekey) {
+            if(turnstileId) { try{turnstile.remove(turnstileId);}catch(e){} }
+            turnstileContainer.innerHTML = '';
+            if(!window.turnstile) return setTimeout(()=>renderTurnstile(sitekey),200);
+            turnstileId = turnstile.render(turnstileContainer, {
+                sitekey, callback: (token) => {
+                    turnstileToken = token; cfStatus.innerText = '✓ 验证通过';
+                    switchTestBtn.style.display='none';
+                    if(pendingAction) {
+                        if(pendingAction === 'preview') executePreview();
+                        else if(pendingAction === 'save') showSaveConfirmModal();
+                        pendingAction = null;
+                    }
+                },
+                'error-callback': ()=> { cfStatus.innerText='验证失败'; switchTestBtn.style.display='inline-block'; },
+                'expired-callback': ()=> { turnstileToken=null; cfStatus.innerText='验证过期'; }
+            });
+        }
+
+        function resetTurnstile() { if(turnstileId) turnstile.reset(turnstileId); turnstileToken = null; cfStatus.innerText=''; }
+
+        // 预览
+        async function executePreview() {
+            try {
+                showToast('保存预览至 playground2...');
+                await rpc('core.savePage', {page:PREVIEW_PAGE, text:editor.getValue(), summary:summaryInput.value, isminor:minorChk.checked});
+                const html = await rpc('core.getPageHTML', {page:PREVIEW_PAGE, rev:0});
+                previewContainer.innerHTML = html;
+                if(!previewContainer.classList.contains('show')) togglePreview(true);
+                showToast('预览已更新');
+            } catch(e) { showToast('预览失败: '+e.message, true); }
+            finally { resetTurnstile(); }
+        }
+
+        function togglePreview(force) {
+            const show = force !== undefined ? force : !previewContainer.classList.contains('show');
+            previewContainer.classList.toggle('show', show);
+            previewChevron.textContent = show ? '▼' : '▶';
+        }
+
+        // 保存确认模态
+        function showSaveConfirmModal() {
+            showModal('人机验证通过', '验证成功，确认保存到 '+currentPageId+' 吗？', async () => {
+                try {
+                    await rpc('core.savePage', {page:currentPageId, text:editor.getValue(), summary:summaryInput.value, isminor:minorChk.checked});
+                    showToast('保存成功');
+                } catch(e) { showToast('保存失败: '+e.message, true); }
+                resetTurnstile();
+            });
+        }
+
+        // 触发验证流程
+        function triggerAction(action) {
+            if(!currentPageId) { showToast('请先加载页面', true); return; }
+            if(turnstileToken) {
+                // 已有有效token，直接执行
+                if(action==='preview') executePreview();
+                else showSaveConfirmModal();
+                turnstileToken = null; resetTurnstile();
+            } else {
+                pendingAction = action;
+                resetTurnstile();
+                renderTurnstile(currentSitekey);
+                cfStatus.innerText = '⏳ 请完成验证';
+            }
+        }
+
+        // 事件绑定
+        loadBtn.onclick = loadPage;
+        previewBtn.onclick = ()=> triggerAction('preview');
+        saveBtn.onclick = ()=> triggerAction('save');
+        toggleHeader.onclick = ()=> togglePreview();
+        switchTestBtn.onclick = ()=> { currentSitekey = TEST_SITEKEY; renderTurnstile(TEST_SITEKEY); switchTestBtn.style.display='none'; };
+
+        // 初始化
+        buildToolbar();
+        renderTurnstile(SITEKEY);
+        // 初始不自动加载
+        // 折叠默认关闭
+        previewContainer.classList.remove('show');
+        previewChevron.textContent = '▶';
+    })();
+</script>
+</body>
+</html>
+// 此文件在https://github.com/MCnnyy2/DokuWiki_HightLightSyntaxHTML_byMCnnyy2
+// 由deepseek编写emm
